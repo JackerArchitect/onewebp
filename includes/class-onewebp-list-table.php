@@ -8,14 +8,20 @@ if ( ! class_exists( 'WP_List_Table' ) ) {
 }
 
 class OneWebP_List_Table extends WP_List_Table {
+
     public function __construct() {
         parent::__construct( array( 
             'singular' => 'log', 
-            'plural' => 'logs', 
-            'ajax' => false 
+            'plural'   => 'logs', 
+            'ajax'     => false 
         ) );
     }
 
+    /**
+     * Get the table columns.
+     *
+     * @return array
+     */
     public function get_columns() {
         return array(
             'cb'            => '<input type="checkbox" />',
@@ -27,21 +33,32 @@ class OneWebP_List_Table extends WP_List_Table {
         );
     }
 
+    /**
+     * Get the bulk actions dropdown.
+     *
+     * @return array
+     */
     public function get_bulk_actions() {
         return array(
-            'delete' => __( 'Delete', 'onewebp' ),
-            'reoptimize' => __( 'Reoptimize', 'onewebp' )
+            'delete'      => __( 'Delete', 'onewebp' ),
+            'reoptimize'  => __( 'Reoptimize', 'onewebp' )
         );
     }
 
+    /**
+     * Prepare the items for the table.
+     */
     public function prepare_items() {
         global $wpdb;
         $table = $wpdb->prefix . 'onewebp_logs';
         $per_page = 30;
         $current_page = $this->get_pagenum();
 
-        // Search
-        $search = isset( $_POST['s'] ) ? sanitize_text_field( $_POST['s'] ) : '';
+        // Handle bulk actions.
+        $this->process_bulk_action();
+
+        // Search.
+        $search = isset( $_POST['s'] ) ? sanitize_text_field( wp_unslash( $_POST['s'] ) ) : '';
         $where = '';
         if ( ! empty( $search ) ) {
             $where = $wpdb->prepare( " WHERE original_url LIKE %s", '%' . $wpdb->esc_like( $search ) . '%' );
@@ -49,10 +66,12 @@ class OneWebP_List_Table extends WP_List_Table {
 
         $total_items = (int) $wpdb->get_var( "SELECT COUNT(id) FROM {$table} {$where}" );
 
-        $orderby = isset( $_GET['orderby'] ) ? sanitize_sql_orderby( $_GET['orderby'] ) : 'id';
-        $order = isset( $_GET['order'] ) ? strtoupper( sanitize_text_field( $_GET['order'] ) ) : 'DESC';
-        $order = in_array( $order, array( 'ASC', 'DESC' ) ) ? $order : 'DESC';
+        // Sorting.
+        $orderby = isset( $_GET['orderby'] ) ? sanitize_sql_orderby( wp_unslash( $_GET['orderby'] ) ) : 'id';
+        $order = isset( $_GET['order'] ) ? strtoupper( sanitize_text_field( wp_unslash( $_GET['order'] ) ) ) : 'DESC';
+        $order = in_array( $order, array( 'ASC', 'DESC' ), true ) ? $order : 'DESC';
 
+        // Fetch data.
         $this->items = $wpdb->get_results( $wpdb->prepare(
             "SELECT * FROM {$table} {$where} ORDER BY {$orderby} {$order} LIMIT %d OFFSET %d",
             $per_page,
@@ -72,13 +91,90 @@ class OneWebP_List_Table extends WP_List_Table {
         );
     }
 
+    /**
+     * Render the checkbox for each row.
+     *
+     * @param array $item The current item.
+     * @return string
+     */
+    public function column_cb( $item ) {
+        return sprintf(
+            '<input type="checkbox" name="log_ids[]" value="%s" />',
+            esc_attr( $item['id'] )
+        );
+    }
+
+    /**
+     * Handle the bulk actions.
+     */
+    public function process_bulk_action() {
+        global $wpdb;
+        $table = $wpdb->prefix . 'onewebp_logs';
+
+        if ( empty( $_POST['log_ids'] ) || empty( $_POST['action'] ) || $_POST['action'] === '-1' ) {
+            return;
+        }
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'You do not have permission to perform this action.', 'onewebp' ) );
+        }
+
+        $log_ids = array_map( 'absint', (array) $_POST['log_ids'] );
+        $action  = sanitize_text_field( wp_unslash( $_POST['action'] ) );
+        $ids_placeholder = implode( ',', array_fill( 0, count( $log_ids ), '%d' ) );
+
+        if ( $action === 'delete' ) {
+            // Delete files.
+            $records = $wpdb->get_results( $wpdb->prepare( "SELECT webp_url FROM {$table} WHERE id IN ($ids_placeholder)", $log_ids ) );
+            foreach ( $records as $record ) {
+                if ( ! empty( $record->webp_url ) && file_exists( $record->webp_url ) ) {
+                    @unlink( $record->webp_url );
+                }
+            }
+            $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE id IN ($ids_placeholder)", $log_ids ) );
+            
+        } elseif ( $action === 'reoptimize' ) {
+            // Handle batch reoptimization.
+            if ( ! class_exists( 'OneWebP_Converter' ) ) {
+                require_once ONEWEBP_DIR . 'includes/class-onewebp-converter.php';
+            }
+            $converter = new OneWebP_Converter();
+            $records = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$table} WHERE id IN ($ids_placeholder)", $log_ids ) );
+
+            foreach ( $records as $record ) {
+                if ( file_exists( $record->webp_url ) ) {
+                    @unlink( $record->webp_url );
+                }
+                $result = $converter->execute_conversion( $record->original_url, $record->webp_url );
+                if ( $result['success'] ) {
+                    $webp_size = file_exists( $record->webp_url ) ? filesize( $record->webp_url ) : 0;
+                    $wpdb->update( $table, array( 
+                        'status' => 'success', 
+                        'webp_size' => $webp_size,
+                        'is_downscaled' => $result['is_downscaled'] ? 1 : 0 
+                    ), array( 'id' => $record->id ) );
+                } else {
+                    $wpdb->update( $table, array( 'status' => 'failed' ), array( 'id' => $record->id ) );
+                }
+            }
+        }
+
+        // Redirect to avoid resubmission on refresh.
+        wp_safe_redirect( add_query_arg( 'msg', 'bulk_done', admin_url( 'admin.php?page=onewebp&tab=manager' ) ) );
+        exit;
+    }
+
+    /**
+     * Handle the default column rendering.
+     *
+     * @param array  $item        The current item.
+     * @param string $column_name The column name.
+     * @return string
+     */
     public function column_default( $item, $column_name ) {
         $upload_dir = wp_upload_dir();
         
         switch ( $column_name ) {
-            case 'cb':
-                return '<input type="checkbox" name="log_ids[]" value="' . esc_attr( $item['id'] ) . '" />';
-                
             case 'preview':
                 $img_url = str_replace( $upload_dir['basedir'], $upload_dir['baseurl'], $item['original_url'] );
                 return '<img src="' . esc_url( $img_url ) . '" style="width:40px; height:40px; object-fit:cover; border:1px solid #ddd; display:inline-block; vertical-align:middle; margin:0;">';
@@ -105,7 +201,7 @@ class OneWebP_List_Table extends WP_List_Table {
                 
                 if ( $ext === 'webp' ) {
                     $size_text = $item['original_size'] > 0 ? size_format( $item['original_size'], 2 ) : '-';
-                    return $size_text . ' <span style="color:#2271b1; font-weight:bold; font-size:11px;">(' . __( 'Already WebP', 'onewebp' ) . ')</span>';
+                    return $size_text . ' <span style="color:#2271b1; font-weight:bold; font-size:11px;">(' . esc_html__( 'Already WebP', 'onewebp' ) . ')</span>';
                 }
 
                 if ( $item['status'] === 'success' ) {
@@ -126,12 +222,12 @@ class OneWebP_List_Table extends WP_List_Table {
                     
                 } else {
                     if ( ! in_array( $ext, $supported_exts ) ) {
-                        return '<span style="color:#999; font-style:italic;">' . __( 'Unsupported Format', 'onewebp' ) . '</span>';
+                        return '<span style="color:#999; font-style:italic;">' . esc_html__( 'Unsupported Format', 'onewebp' ) . '</span>';
                     } else {
                         $base_url = admin_url( 'admin.php?page=onewebp&tab=manager' );
                         $nonce = wp_create_nonce( 'onewebp_action_' . $item['id'] );
                         $optimize_url = esc_url( $base_url . '&action=reoptimize&log_id=' . $item['id'] . '&_wpnonce=' . $nonce );
-                        return '<a href="' . $optimize_url . '" class="button button-small">' . __( 'Retry', 'onewebp' ) . '</a>';
+                        return '<a href="' . $optimize_url . '" class="button button-small">' . esc_html__( 'Retry', 'onewebp' ) . '</a>';
                     }
                 }
                 
@@ -142,17 +238,17 @@ class OneWebP_List_Table extends WP_List_Table {
                 
                 if ( ! in_array( $ext, array( 'jpg', 'jpeg', 'png', 'gif', 'webp' ) ) ) {
                     $remove_url = esc_url( $base_url . '&action=remove&log_id=' . $item['id'] . '&_wpnonce=' . $nonce );
-                    return '<a href="' . $remove_url . '" style="color:#d63638;" onclick="return confirm(\'' . esc_js( __( 'Delete record?', 'onewebp' ) ) . '\');">' . __( 'Remove', 'onewebp' ) . '</a>';
+                    return '<a href="' . $remove_url . '" style="color:#d63638;" onclick="return confirm(\'' . esc_js( __( 'Delete record?', 'onewebp' ) ) . '\');">' . esc_html__( 'Remove', 'onewebp' ) . '</a>';
                 }
 
                 if ( $ext === 'webp' || $item['status'] === 'success' ) {
                     $webp_url = str_replace( $upload_dir['basedir'], $upload_dir['baseurl'], $item['webp_url'] );
                     
                     $actions = array();
-                    $actions['edit'] = '<a href="' . esc_url( $base_url . '&action=edit&log_id=' . $item['id'] . '&_wpnonce=' . $nonce ) . '">' . __( 'Edit', 'onewebp' ) . '</a>';
-                    $actions['reoptimize'] = '<a href="' . esc_url( $base_url . '&action=reoptimize&log_id=' . $item['id'] . '&_wpnonce=' . $nonce ) . '">' . __( 'Reoptimize', 'onewebp' ) . '</a>';
-                    $actions['remove'] = '<a href="' . esc_url( $base_url . '&action=remove&log_id=' . $item['id'] . '&_wpnonce=' . $nonce ) . '" style="color:#d63638;" onclick="return confirm(\'' . esc_js( __( 'Delete this WebP file?', 'onewebp' ) ) . '\');">' . __( 'Remove', 'onewebp' ) . '</a>';
-                    $actions['copy_url'] = '<a href="#" class="onewebp-copy-url" data-url="' . esc_attr( $webp_url ) . '">' . __( 'Copy URL', 'onewebp' ) . '</a>';
+                    $actions['edit'] = '<a href="' . esc_url( $base_url . '&action=edit&log_id=' . $item['id'] . '&_wpnonce=' . $nonce ) . '">' . esc_html__( 'Edit', 'onewebp' ) . '</a>';
+                    $actions['reoptimize'] = '<a href="' . esc_url( $base_url . '&action=reoptimize&log_id=' . $item['id'] . '&_wpnonce=' . $nonce ) . '">' . esc_html__( 'Reoptimize', 'onewebp' ) . '</a>';
+                    $actions['remove'] = '<a href="' . esc_url( $base_url . '&action=remove&log_id=' . $item['id'] . '&_wpnonce=' . $nonce ) . '" style="color:#d63638;" onclick="return confirm(\'' . esc_js( __( 'Delete this WebP file?', 'onewebp' ) ) . '\');">' . esc_html__( 'Remove', 'onewebp' ) . '</a>';
+                    $actions['copy_url'] = '<a href="#" class="onewebp-copy-url" data-url="' . esc_attr( $webp_url ) . '">' . esc_html__( 'Copy URL', 'onewebp' ) . '</a>';
                     
                     return implode( ' | ', $actions );
                 }
@@ -172,7 +268,7 @@ class OneWebP_List_Table extends WP_List_Table {
             }
         }
         
-        // Try to get from filename
+        // Try to get dimensions from filename.
         $file_name = basename( $item['original_url'] );
         if ( preg_match( '/-(\d+)x(\d+)\./', $file_name, $matches ) ) {
             return $matches[1] . 'x' . $matches[2];
