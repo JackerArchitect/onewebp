@@ -1,0 +1,4 @@
+.onewebp-dashboard-card { max-width: 800px; margin-top: 20px; padding: 20px; background: #fff; border: 1px solid #c3c4c7; }
+.onewebp-stats-box { margin: 20px 0; padding: 15px; background: #f0f6fc; border-left: 4px solid #0073aa; }
+.onewebp-progress-bar-bg { background: #f0f0f0; height: 20px; border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
+#onewebp-progress-bar { background: #0073aa; height: 100%; width: 0%; transition: width 0.3s; }
