@@ -12,25 +12,6 @@ OneWebP is a lightweight, open-source WordPress plugin designed to boost your we
 
 ---
 
-## Table of Contents
-
-- [Features](#-features)
-- [Why OneWebP](#-why-onewebp)
-- [Supported Formats](#-supported-formats)
-- [Image Deletion Modes](#-image-deletion-modes)
-- [Installation](#-installation)
-- [Quick Start](#-quick-start)
-- [Requirements](#-requirements)
-- [Screenshots](#-screenshots)
-- [Performance Impact](#-performance-impact)
-- [Privacy Guarantee](#-privacy-guarantee)
-- [Known Issues](#-known-issues)
-- [Roadmap](#-roadmap)
-- [Support & Feedback](#-support--feedback)
-- [License](#-license)
-
----
-
 ## ✨ Features
 
 | Feature | Description |
@@ -131,25 +112,6 @@ OneWebP offers three deletion modes to give you full control over your images:
 
 ---
 
-## 📸 Screenshots
-
-### Dashboard
-Real-time stats, progress tracking, and one-click optimization.
-
-*[Screenshot coming soon]*
-
-### Settings
-Granular control over quality, resolution, format support, and deletion modes.
-
-*[Screenshot coming soon]*
-
-### Image Manager
-Detailed list with preview, size, savings, and individual actions.
-
-*[Screenshot coming soon]*
-
----
-
 ## 📊 Performance Impact
 
 | Metric | Before | After OneWebP | Improvement |
@@ -186,23 +148,6 @@ OneWebP is **100% private**:
 | **SVG conversion** | ❌ Not supported | SVG is vector format. Keep as SVG for best results. |
 | **BMP/TIFF conversion** | ⚠️ Not recommended | Large file sizes may cause memory issues. Convert manually first. |
 | **Memory exhaustion** | ⚠️ Possible | Increase PHP memory_limit or reduce batch size. |
-
----
-
-## 🗺️ Roadmap
-
-### v1.1.0 (Planned)
-- [ ] WebP to WebP optimization (lossless compression)
-- [ ] Image CDN support
-- [ ] Scheduled optimization
-- [ ] Better memory management for large images
-- [ ] WP-CLI support
-
-### v1.2.0 (Planned)
-- [ ] AVIF support (next-gen format)
-- [ ] WebP quality presets
-- [ ] Advanced image optimization options
-- [ ] Improved external image support
 
 ---
 
